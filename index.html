@@ -100,6 +100,19 @@
         </div>
         <div class="hint">The app saves your table in this browser session automatically.</div>
       </div>
+      <div class="row">
+        <div class="left">
+          <label for="pomodoroMinutes">Pomodoro</label>
+          <select id="pomodoroMinutes">
+            <option value="25" selected>25 min</option>
+            <option value="15">15 min</option>
+            <option value="45">45 min</option>
+          </select>
+        </div>
+      <div class="right hint" id="pomodoroStatus">
+        Pomodoro idle
+      </div>
+</div>
 
       <div class="table-wrap">
         <table id="taskTable" aria-describedby="Task log table">
@@ -144,6 +157,57 @@
     const nowISO = () => new Date().toISOString();
     const uid = () => Math.random().toString(36).slice(2, 10) + Date.now().toString(36).slice(-4);
 
+    // --- Pomodoro Timer ---
+let pomodoroTimer = null;
+let pomodoroEndTime = null;
+
+const pomodoroSelect = document.getElementById('pomodoroMinutes');
+const pomodoroStatusEl = document.getElementById('pomodoroStatus');
+
+// Ask permission once
+if ('Notification' in window && Notification.permission === 'default') {
+  Notification.requestPermission();
+}
+
+function startPomodoro() {
+  stopPomodoro(); // reset if already running
+
+  const minutes = Number(pomodoroSelect.value);
+  pomodoroEndTime = Date.now() + minutes * 60 * 1000;
+
+  pomodoroStatusEl.textContent = `Pomodoro running (${minutes} min)`;
+
+  pomodoroTimer = setTimeout(() => {
+    pomodoroComplete();
+  }, minutes * 60 * 1000);
+}
+
+function stopPomodoro() {
+  if (pomodoroTimer) {
+    clearTimeout(pomodoroTimer);
+    pomodoroTimer = null;
+  }
+  pomodoroEndTime = null;
+  pomodoroStatusEl.textContent = 'Pomodoro idle';
+}
+
+function pomodoroComplete() {
+  pomodoroTimer = null;
+  pomodoroStatusEl.textContent = 'Pomodoro complete 🍅';
+
+  // Beep
+  const audio = new Audio(
+    'data:audio/wav;base64,UklGRigAAABXQVZFZm10IBAAAAABAAEAQB8AAEAfAAABAAgAZGF0YQAAAAA='
+  );
+  audio.play().catch(() => {});
+
+  // Notification
+  if ('Notification' in window && Notification.permission === 'granted') {
+    new Notification('Pomodoro Complete', {
+      body: 'Time to take a break!',
+    });
+  }
+}
     function msToHMS(ms){
       if (ms == null || ms < 0) return '';
       const s = Math.floor(ms/1000);
@@ -215,22 +279,29 @@
       const task = { id: uid(), description: desc, startISO: nowISO(), endISO: null };
       tasks.push(task);
       runningId = task.id;
+      
+      startPomodoro(); // ✅ start pomodoro with task
+      
       persist();
       render();
       setStatus('Task started.');
     }
     function stopTask() {
       const t = tasks.find(x => x.id === runningId);
-      if (t) {
-        t.endISO = nowISO();
-        runningId = null;
-        descEl.disabled = false;
-        descEl.value = '';
-        persist();
-        render();
-        setStatus('Task stopped and input cleared.');
+        if (t) {
+          t.endISO = nowISO();
+          runningId = null;
+
+          stopPomodoro(); // ✅ stop pomodoro when task ends
+
+          descEl.disabled = false;
+          descEl.value = '';
+          persist();
+          render();
+          setStatus('Task stopped and input cleared.');
       }
-    }
+  }
+
     function startCall() {
       const call = { id: uid(), description: 'Call -', startISO: nowISO(), endISO: null };
       tasks.push(call);
