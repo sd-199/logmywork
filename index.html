@@ -3,33 +3,47 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Pomodoro Work Logger</title>
+<title>Pomodoro Task Logger</title>
 
 <style>
-body { font-family: system-ui; background:#f4f6fb; padding:20px; }
-.panel { background:white; padding:16px; border-radius:12px; margin-bottom:16px; }
-
-button {
-  padding:10px;
-  border:none;
-  border-radius:8px;
-  cursor:pointer;
-  background:#2563eb;
-  color:white;
+body {
+  font-family: Arial;
+  background: #f4f6fb;
+  padding: 20px;
 }
 
-button.stop { background:#dc2626; }
+.panel {
+  background: white;
+  padding: 15px;
+  border-radius: 10px;
+  margin-bottom: 15px;
+}
 
-input { width:60px; }
-#timer { font-size:28px; font-weight:bold; }
+button {
+  padding: 10px;
+  border: none;
+  border-radius: 6px;
+  cursor: pointer;
+  background: #2563eb;
+  color: white;
+}
+
+button.stop { background: red; }
+
+input, textarea {
+  padding: 5px;
+  margin: 5px;
+}
+
+#timer {
+  font-size: 28px;
+  margin-top: 10px;
+}
 </style>
 </head>
 
 <body>
 
-<!-- ======================
-     POMODORO PANEL
-====================== -->
 <div class="panel">
   <h2>Pomodoro</h2>
 
@@ -38,84 +52,233 @@ input { width:60px; }
   Long <input id="long" value="15">
   Sessions <input id="sessions" value="4">
 
+  <br>
+
+  <label>
+    <input type="checkbox" id="auto" checked>
+    Auto cycle
+  </label>
+
   <br><br>
 
-  <label><input type="checkbox" id="auto" checked> Auto cycle</label>
-
-  <br><br>
-
-  <button id="startPom">Start</button>
+  <button id="startPom">Start Pomodoro</button>
   <button id="stopPom" class="stop">Stop</button>
 
-  <h3 id="timer">25:00</h3>
-  <div id="pomStatus">Idle</div>
+  <div id="timer">25:00</div>
+  <div id="status">Idle</div>
 </div>
 
-<!-- ======================
-     TASK PANEL
-====================== -->
 <div class="panel">
   <h2>Task Logger</h2>
 
-  <textarea id="desc" placeholder="Task description"></textarea><br><br>
+  <textarea id="desc" placeholder="Enter task..."></textarea><br>
 
   <button id="startTask">Start Task</button>
   <button id="stopTask">Stop Task</button>
-  <button id="export">Export CSV</button>
 
-  <table id="table" border="1" style="width:100%;margin-top:10px;">
+  <table border="1" width="100%">
     <thead>
       <tr>
-        <th>No</th><th>Task</th><th>Start</th><th>End</th><th>Duration</th>
+        <th>Task</th>
+        <th>Start</th>
+        <th>End</th>
+        <th>Duration</th>
       </tr>
     </thead>
-    <tbody></tbody>
+    <tbody id="table"></tbody>
   </table>
 </div>
 
 <script>
-/* ---------------------
-   GLOBAL STATES
----------------------- */
-let tasks = [];
-let current = null;
+/* =====================
+   ELEMENTS
+===================== */
+const startTaskBtn = document.getElementById("startTask");
+const stopTaskBtn = document.getElementById("stopTask");
+const desc = document.getElementById("desc");
 
-/* ---------------------
+const startPomBtn = document.getElementById("startPom");
+const stopPomBtn = document.getElementById("stopPom");
+
+const timerEl = document.getElementById("timer");
+const statusEl = document.getElementById("status");
+const tableEl = document.getElementById("table");
+
+const workEl = document.getElementById("work");
+const shortEl = document.getElementById("short");
+const longEl = document.getElementById("long");
+const sessionsEl = document.getElementById("sessions");
+const autoEl = document.getElementById("auto");
+
+/* =====================
+   STATE
+===================== */
+let tasks = [];
+let currentTask = null;
+
+let timer = null;
+let timeLeft = 0;
+let mode = "work";
+let session = 0;
+
+/* =====================
    SOUND
----------------------- */
-function beep(){
-  const ctx = new (window.AudioContext||window.webkitAudioContext)();
+===================== */
+function beep() {
+  const ctx = new (window.AudioContext || window.webkitAudioContext)();
   const osc = ctx.createOscillator();
   osc.frequency.value = 880;
   osc.connect(ctx.destination);
   osc.start();
-  setTimeout(()=>osc.stop(),300);
+  setTimeout(() => osc.stop(), 300);
 }
 
-/* ---------------------
-   TIME HELPERS
----------------------- */
-function now(){ return new Date(); }
-function fmt(t){ return t? t.toLocaleTimeString() : ""; }
-
-function dur(a,b){
-  if(!a) return "";
-  const ms=(b?b:new Date())-a;
-  const s=Math.floor(ms/1000);
-  return `${Math.floor(s/3600)}:${Math.floor(s%3600/60)}:${s%60}`;
+/* =====================
+   TIMER DISPLAY
+===================== */
+function updateTimer() {
+  const m = Math.floor(timeLeft / 60);
+  const s = timeLeft % 60;
+  timerEl.textContent =
+    String(m).padStart(2, '0') + ":" +
+    String(s).padStart(2, '0');
 }
 
-/* ---------------------
-   TABLE RENDER
----------------------- */
-function render(){
-  const tb=document.querySelector("tbody");
-  tb.innerHTML="";
-  [...tasks].reverse().forEach((t,i)=>{
-    const tr=document.createElement("tr");
-    tr.innerHTML=`
-      <td>${tasks.length-i}</td>
+/* =====================
+   TIMER ENGINE
+===================== */
+function startTimer(seconds) {
+  clearInterval(timer);
+  timeLeft = Number(seconds);
+  updateTimer();
+
+  timer = setInterval(() => {
+    timeLeft--;
+    updateTimer();
+
+    if (timeLeft <= 0) {
+      clearInterval(timer);
+      nextPhase();
+    }
+  }, 1000);
+}
+
+function nextPhase() {
+  beep();
+
+  const work = Number(workEl.value) * 60;
+  const short = Number(shortEl.value) * 60;
+  const long = Number(longEl.value) * 60;
+  const max = Number(sessionsEl.value);
+
+  if (mode === "work") {
+    session++;
+
+    if (session % max === 0) {
+      mode = "long";
+      statusEl.textContent = "Long break";
+      autoRun(long);
+    } else {
+      mode = "break";
+      statusEl.textContent = "Short break";
+      autoRun(short);
+    }
+  } else {
+    mode = "work";
+    statusEl.textContent = "Work";
+    autoRun(work);
+  }
+}
+
+function autoRun(sec) {
+  if (autoEl.checked) {
+    startTimer(sec);
+  }
+}
+
+/* =====================
+   TASK LOGIC
+===================== */
+function renderTasks() {
+  tableEl.innerHTML = "";
+
+  tasks.slice().reverse().forEach(t => {
+    const tr = document.createElement("tr");
+
+    const duration = t.end
+      ? Math.floor((t.end - t.start) / 1000)
+      : Math.floor((new Date() - t.start) / 1000);
+
+    tr.innerHTML = `
       <td>${t.desc}</td>
-      <td>${fmt(t.start)}</td>
-      <td>${fmt(t.end)}</td>
-      <td>${dur(t.start,t.end)}</td>`;
+      <td>${t.start.toLocaleTimeString()}</td>
+      <td>${t.end ? t.end.toLocaleTimeString() : ""}</td>
+      <td>${duration}s</td>`;
+
+    tableEl.appendChild(tr);
+  });
+}
+
+/* =====================
+   BUTTON EVENTS
+===================== */
+startTaskBtn.onclick = () => {
+
+  const text = desc.value.trim();
+
+  if (!text) {
+    alert("Enter a task!");
+    return;
+  }
+
+  currentTask = {
+    desc: text,
+    start: new Date(),
+    end: null
+  };
+
+  tasks.push(currentTask);
+  renderTasks();
+
+  // 🔥 Start Pomodoro automatically
+  session = 0;
+  mode = "work";
+  statusEl.textContent = "Work";
+
+  startTimer(Number(workEl.value) * 60);
+
+  desc.value = "";
+};
+
+stopTaskBtn.onclick = () => {
+  if (!currentTask) return;
+
+  currentTask.end = new Date();
+  currentTask = null;
+
+  renderTasks();
+
+  clearInterval(timer);
+  statusEl.textContent = "Stopped";
+};
+
+startPomBtn.onclick = () => {
+  session = 0;
+  mode = "work";
+  statusEl.textContent = "Work";
+  startTimer(Number(workEl.value) * 60);
+};
+
+stopPomBtn.onclick = () => {
+  clearInterval(timer);
+  statusEl.textContent = "Stopped";
+};
+
+/* =====================
+   INIT
+===================== */
+updateTimer();
+</script>
+
+</body>
+</html>
