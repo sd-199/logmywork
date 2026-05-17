@@ -1,104 +1,91 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-<meta charset="UTF-8" />
-<meta name="viewport" content="width=device-width, initial-scale=1.0" />
-<title>Pomodoro Logger</title>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Pomodoro Work Logger</title>
 
 <style>
-:root {
-  --accent: #2563eb;
-  --danger: #dc2626;
-  --success: #16a34a;
-}
-
-body {
-  font-family: system-ui;
-  background: #f4f6fb;
-  padding: 20px;
-}
-
-.panel {
-  background: white;
-  padding: 16px;
-  border-radius: 12px;
-  margin-bottom: 16px;
-  box-shadow: 0 6px 20px rgba(0,0,0,0.05);
-}
+body { font-family: system-ui; background:#f4f6fb; padding:20px; }
+.panel { background:white; padding:16px; border-radius:12px; margin-bottom:16px; }
 
 button {
-  padding: 10px 14px;
-  border: none;
-  border-radius: 10px;
-  cursor: pointer;
-  background: var(--accent);
-  color: white;
-  font-weight: 600;
+  padding:10px;
+  border:none;
+  border-radius:8px;
+  cursor:pointer;
+  background:#2563eb;
+  color:white;
 }
 
-button.secondary { background: #111; }
-button.stop { background: var(--danger); }
+button.stop { background:#dc2626; }
 
-input, select {
-  padding: 6px;
-  border-radius: 6px;
-}
-
-.row {
-  display: flex;
-  gap: 12px;
-  flex-wrap: wrap;
-  align-items: center;
-}
-
-#timerDisplay {
-  font-size: 32px;
-  font-weight: bold;
-}
-
+input { width:60px; }
+#timer { font-size:28px; font-weight:bold; }
 </style>
 </head>
 
 <body>
 
+<!-- ======================
+     POMODORO PANEL
+====================== -->
 <div class="panel">
-  <h2>Pomodoro Controls</h2>
+  <h2>Pomodoro</h2>
 
-  <div class="row">
-    Work: <input id="workMin" type="number" value="25" min="1"> min
-    Break: <input id="breakMin" type="number" value="5" min="1"> min
-    Long: <input id="longMin" type="number" value="15" min="1"> min
-    Sessions: <input id="sessions" type="number" value="4" min="1">
-  </div>
+  Work <input id="work" value="25">
+  Break <input id="short" value="5">
+  Long <input id="long" value="15">
+  Sessions <input id="sessions" value="4">
 
-  <div class="row">
-    <label><input type="checkbox" id="autoStart" checked> Auto cycle</label>
-  </div>
+  <br><br>
 
-  <div class="row">
-    <button id="startPom">Start</button>
-    <button id="stopPom" class="stop">Stop</button>
-  </div>
+  <label><input type="checkbox" id="auto" checked> Auto cycle</label>
 
-  <div id="timerDisplay">25:00</div>
-  <div id="status">Idle</div>
+  <br><br>
+
+  <button id="startPom">Start</button>
+  <button id="stopPom" class="stop">Stop</button>
+
+  <h3 id="timer">25:00</h3>
+  <div id="pomStatus">Idle</div>
 </div>
 
+<!-- ======================
+     TASK PANEL
+====================== -->
 <div class="panel">
   <h2>Task Logger</h2>
+
   <textarea id="desc" placeholder="Task description"></textarea><br><br>
+
   <button id="startTask">Start Task</button>
   <button id="stopTask">Stop Task</button>
+  <button id="export">Export CSV</button>
+
+  <table id="table" border="1" style="width:100%;margin-top:10px;">
+    <thead>
+      <tr>
+        <th>No</th><th>Task</th><th>Start</th><th>End</th><th>Duration</th>
+      </tr>
+    </thead>
+    <tbody></tbody>
+  </table>
 </div>
 
 <script>
 /* ---------------------
-   SIMPLE SOUND (RELIABLE)
+   GLOBAL STATES
 ---------------------- */
-function beep() {
-  const ctx = new (window.AudioContext || window.webkitAudioContext)();
+let tasks = [];
+let current = null;
+
+/* ---------------------
+   SOUND
+---------------------- */
+function beep(){
+  const ctx = new (window.AudioContext||window.webkitAudioContext)();
   const osc = ctx.createOscillator();
-  osc.type = "sine";
   osc.frequency.value = 880;
   osc.connect(ctx.destination);
   osc.start();
@@ -106,122 +93,29 @@ function beep() {
 }
 
 /* ---------------------
-   POMODORO ENGINE
+   TIME HELPERS
 ---------------------- */
-let timer = null;
-let timeLeft = 0;
-let mode = "work";
-let sessionCount = 0;
+function now(){ return new Date(); }
+function fmt(t){ return t? t.toLocaleTimeString() : ""; }
 
-const display = document.getElementById("timerDisplay");
-const statusEl = document.getElementById("status");
-
-function updateDisplay() {
-  const m = String(Math.floor(timeLeft / 60)).padStart(2,'0');
-  const s = String(timeLeft % 60).padStart(2,'0');
-  display.textContent = `${m}:${s}`;
-}
-
-function startTimer(seconds) {
-  clearInterval(timer);
-  timeLeft = seconds;
-  updateDisplay();
-
-  timer = setInterval(() => {
-    timeLeft--;
-    updateDisplay();
-
-    if (timeLeft <= 0) {
-      clearInterval(timer);
-      onComplete();
-    }
-  }, 1000);
-}
-
-function onComplete() {
-  beep();
-
-  if (Notification.permission === "granted") {
-    new Notification("Pomodoro done!");
-  }
-
-  const workMin = +workMinEl.value * 60;
-  const breakMin = +breakMinEl.value * 60;
-  const longMin = +longMinEl.value * 60;
-  const maxSessions = +sessionsEl.value;
-
-  if (mode === "work") {
-    sessionCount++;
-
-    if (sessionCount % maxSessions === 0) {
-      mode = "long";
-      statusEl.textContent = "Long break";
-      autoNext(longMin);
-    } else {
-      mode = "break";
-      statusEl.textContent = "Short break";
-      autoNext(breakMin);
-    }
-  } else {
-    mode = "work";
-    statusEl.textContent = "Work";
-    autoNext(workMin);
-  }
-}
-
-function autoNext(duration) {
-  if (autoStart.checked) {
-    startTimer(duration);
-  }
+function dur(a,b){
+  if(!a) return "";
+  const ms=(b?b:new Date())-a;
+  const s=Math.floor(ms/1000);
+  return `${Math.floor(s/3600)}:${Math.floor(s%3600/60)}:${s%60}`;
 }
 
 /* ---------------------
-   CONTROLS
+   TABLE RENDER
 ---------------------- */
-const workMinEl = document.getElementById("workMin");
-const breakMinEl = document.getElementById("breakMin");
-const longMinEl = document.getElementById("longMin");
-const sessionsEl = document.getElementById("sessions");
-const autoStart = document.getElementById("autoStart");
-
-document.getElementById("startPom").onclick = () => {
-  mode = "work";
-  sessionCount = 0;
-  statusEl.textContent = "Work";
-  startTimer(workMinEl.value * 60);
-};
-
-document.getElementById("stopPom").onclick = () => {
-  clearInterval(timer);
-  statusEl.textContent = "Stopped";
-};
-
-/* ---------------------
-   TASK LOGGER (simple)
----------------------- */
-let currentTask = null;
-
-document.getElementById("startTask").onclick = () => {
-  currentTask = {
-    desc: desc.value,
-    start: new Date()
-  };
-  console.log("Task started", currentTask);
-};
-
-document.getElementById("stopTask").onclick = () => {
-  if (!currentTask) return;
-  currentTask.end = new Date();
-  console.log("Task finished", currentTask);
-};
-
-/* ---------------------
-   NOTIFICATION PERMISSION
----------------------- */
-if ("Notification" in window && Notification.permission !== "granted") {
-  Notification.requestPermission();
-}
-</script>
-
-</body>
-</html>
+function render(){
+  const tb=document.querySelector("tbody");
+  tb.innerHTML="";
+  [...tasks].reverse().forEach((t,i)=>{
+    const tr=document.createElement("tr");
+    tr.innerHTML=`
+      <td>${tasks.length-i}</td>
+      <td>${t.desc}</td>
+      <td>${fmt(t.start)}</td>
+      <td>${fmt(t.end)}</td>
+      <td>${dur(t.start,t.end)}</td>`;
